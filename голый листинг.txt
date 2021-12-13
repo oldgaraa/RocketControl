@@ -1,0 +1,463 @@
+#include "stdafx.h"
+#include <iostream>
+#include <cmath>
+#include <iomanip>
+#include <fstream>
+#include <vector>
+#define _USE_MATH_DEFINES
+#include "math.h"
+#include "GOST4401-81.h"
+using namespace std;
+ofstream txtfile2("2.txt");
+
+double a[] = { 0.0,0.5,0.5,1.0 };
+#define dtdt  K[0][j]
+#define dxgdt  K[1][j]
+#define dygdt  K[2][j]
+#define dzgdt  K[3][j]
+#define dVxgdt K[4][j]
+#define dVygdt K[5][j]
+#define dVzgdt K[6][j]
+#define domegaxdt K[7][j]
+#define domegaydt K[8][j]
+#define domegazdt K[9][j]
+#define droRGdt K[10][j]
+#define dlamdaRGdt K[11][j]
+#define dmuRGdt K[12][j]
+#define dnuRGdt K[13][j]
+
+#define t  par[0]
+#define xg  par[1]
+#define yg  par[2]
+#define zg  par[3]
+#define Vxg par[4]
+#define Vyg par[5]
+#define Vzg par[6]
+#define omegax par[7]
+#define omegay par[8]
+#define omegaz par[9]
+#define roRG par[10]
+#define lamdaRG par[11]
+#define muRG par[12]
+#define nuRG par[13]
+
+#define t_RK  parbuf[0]
+#define xg_RK  parbuf[1]
+#define yg_RK  parbuf[2]
+#define zg_RK  parbuf[3]
+#define Vxg_RK parbuf[4]
+#define Vyg_RK parbuf[5]
+#define Vzg_RK parbuf[6]
+#define omegax_RK parbuf[7]
+#define omegay_RK parbuf[8]
+#define omegaz_RK parbuf[9]
+#define roRG_RK parbuf[10]
+#define lamdaRG_RK parbuf[11]
+#define muRG_RK parbuf[12]
+#define nuRG_RK parbuf[13]
+
+
+// Объявление функций
+double Cx(double M);
+double Cy_alpha(double mach);
+double Cy_delta(double mach, double alpha);
+double Cz_betta(double M, double betta);
+double Cz_delta(double M, double betta);
+double mx_omegax();
+double mx_delta(double q);
+double mz_omegaz(double M);
+double mz_alpha(double M);
+double mz_delta(double M, double alpha);
+double my_omegay(double M);
+double my_betta(double M);
+double my_delta(double M, double betta);
+void B_Matr(double fi, double hi, double(*B)[3][3]);
+void Control_prog(double tang, double risk, double kren, double dfidt, double dhidt, double *delta_tang, double *delta_risk, double *delta_kren);
+void MATR(double ro, double lamda, double mu, double nu, double(*A)[3][3], double(*AT)[3][3]);
+
+const double g = 9.81;
+double K[99][99], par[99], parbuf[99], par_drob[99],
+A[3][3] = { 0 }, AT[3][3] = { 0 }, B[3][3] = { 0 };
+double tang, risk, kren, m, V0, q, M, r, V, X, Y, Z, Mx, My, Mz, Mstab, alpha, betta, alpha_full, vx, vy, vz, vr, vfi, vhi,
+delta_tang, delta_risk, delta_kren, fi, hi, dfidt, dhidt, x_t, y_t, z_t, Vx_t = 0, Vy_t = 0, Vz_t = 0,
+Ix = 170,
+Iy = 640,
+Iz = 640,
+dm = 0.95,
+Sm = M_PI*dm*dm / 4.0,
+L = 7,
+dt = 0.01;
+
+int main()
+{
+	Atm_GOST();
+
+	//Начало цикла для построения эллипса
+	//double dx_t = 1000;
+	txtfile2 << "x_t;z_t;r" << endl;
+	double dz_t; bool flag1 = 0, flag2 = 0;
+	//2800
+	for (x_t = 2500; x_t <= 12500; x_t += 100) {
+		//if (flag2 == 1) break;
+		dz_t = 1000;
+		for (z_t = 1000; z_t <= 50000; z_t += dz_t) {
+			y_t = 0;
+			x_t = 2500;
+			z_t = 1985;
+
+			//Начальные условия
+			double N = 2,
+			tang = (-60 + 0.5*N)*M_PI / 180.0;
+			risk = 0;
+			kren = 0;
+			m = 1500 - 5 * N;
+			V0 = 1200;
+			dt = 0.01;
+			t = 0;
+			xg = 0;
+			yg = 10000 - 150 * N;
+			zg = 0;
+			Vxg = V0*cos(tang);
+			Vyg = V0*sin(tang);
+			Vzg = 0;
+			omegax = 0;
+			omegay = 0;
+			omegaz = 0;
+			roRG = cos(risk*0.5)*cos(tang*0.5)*cos(kren*0.5) - sin(risk*0.5)*sin(kren*0.5)*sin(tang*0.5);
+			lamdaRG = sin(risk*0.5)*sin(tang*0.5)*cos(kren*0.5) + cos(risk*0.5)*cos(tang*0.5)*sin(kren*0.5);
+			muRG = sin(risk*0.5)*cos(tang*0.5)*cos(kren*0.5) + cos(risk*0.5)*sin(tang*0.5)*sin(kren*0.5);
+			nuRG = cos(risk*0.5)*sin(tang*0.5)*cos(kren*0.5) - sin(risk*0.5)*cos(tang*0.5)*sin(kren*0.5);
+			ofstream txtfile("1.txt");
+
+			txtfile << "t,s" << ";" << "x,m" << ";" << "y,m" << ";" << "z,m" << ";" << "Vx,m/s" << ";" << "Vy,m/s" << ";" << "Vz,m/s" << ";" << "V,m/s" << ";"
+				<< "tang,grad" << ";" << "risk,grad" << ";" << "kren,grad" << ";" << "omega_x,grad/s" << ";" << "omega_y,grad/s" << ";" << "omega_z,grad/s" << ";"
+				<< "alpha,grad" << ";" << "betta,grad" << ";" << "deltaT, drad" << ";" << "deltaN, grag" << ";" << "deltaE, grad" << ";" << endl;
+			// Интегрирование
+			int step = 0;
+			for (;;) {
+				//cout << t << "  " << r << endl;
+				// Расчет промежуточных параметров на шаге
+				MATR(roRG, lamdaRG, muRG, nuRG, &A, &AT);
+				tang = asin(2 * (roRG*nuRG + lamdaRG*muRG));
+				risk = atan2(2 * (roRG*muRG - lamdaRG*nuRG), roRG*roRG + lamdaRG*lamdaRG - nuRG*nuRG - muRG*muRG);
+				kren = atan2(2 * (roRG*lamdaRG - muRG*nuRG), roRG*roRG - lamdaRG*lamdaRG - nuRG*nuRG + muRG*muRG);
+				r = pow((x_t - xg)*(x_t - xg) + (y_t - yg)*(y_t - yg) + (z_t - zg)*(z_t - zg), 0.5),
+					V = pow(Vxg*Vxg + Vyg*Vyg + Vzg*Vzg, 0.5),
+					q = fro(yg)*V*V*0.5,
+					vx = Vxg*AT[0][0] + Vyg*AT[0][1] + Vzg*AT[0][2],
+					vy = Vxg*AT[1][0] + Vyg*AT[1][1] + Vzg*AT[1][2],
+					vz = Vxg*AT[2][0] + Vyg*AT[2][1] + Vzg*AT[2][2],
+					alpha = -atan2(vy, vx);
+				betta = asin(vz / V);
+				alpha_full = pow(alpha*alpha + betta*betta, 0.5);
+				fi = asin((y_t - yg) / r);
+				hi = -atan2(z_t - zg, x_t - xg);
+				B_Matr(fi, hi, &B);
+				vr = B[0][0] * (Vx_t - Vxg) + B[0][1] * (Vy_t - Vyg) + B[0][2] * (Vz_t - Vzg);
+				vfi = B[1][0] * (Vx_t - Vxg) + B[1][1] * (Vy_t - Vyg) + B[1][2] * (Vz_t - Vzg);
+				vhi = B[2][0] * (Vx_t - Vxg) + B[2][1] * (Vy_t - Vyg) + B[2][2] * (Vz_t - Vzg);
+				dfidt = vfi / r;
+				dhidt = vhi / (r*cos(fi));
+				M = V / fa(yg);
+				if (yg > 500) Control_prog(tang, risk, kren, dfidt, dhidt, &delta_tang, &delta_risk, &delta_kren);
+				X = -Cx(M)*q*Sm;
+				Y = (Cy_alpha(M)*alpha + Cy_delta(M, alpha)*delta_tang)*q*Sm;
+				Z = (Cz_betta(M, betta)*betta + Cz_delta(M, betta)*delta_risk)*q*Sm;
+				Mstab = 0.5 * dm * 1000 * delta_kren;
+				Mx = (mx_omegax()*omegax*L / V)*q*Sm*L + Mstab;
+				My = (my_omegay(M)*omegay*L / V + my_betta(M)*betta + my_delta(M, betta)*delta_risk)*q*Sm*L;
+				Mz = (mz_omegaz(M)*omegaz*L / V + mz_alpha(M)*alpha + mz_delta(M, alpha)*delta_tang)*q*Sm*L;
+
+				// Дробление шага
+				if (yg < 0) {
+					dt *= 0.5;
+					for (int i = 0; i <= 13; i++) par[i] = par_drob[i];
+				}
+				else {
+					for (int i = 0; i <= 13; i++) par_drob[i] = par[i];
+					//вывод в файл
+					int st = 1 / dt;
+					if (step % st == 0) 
+						txtfile
+							<< t << ";" << xg << ";" << yg << ";" << zg << ";" << Vxg << ";" << Vyg << ";" << Vzg << ";" << V << ";"
+							<< tang * 180 / M_PI << ";" << risk * 180 / M_PI << ";" << kren * 180 / M_PI << ";"
+							<< omegax << ";" << omegay << ";" << omegaz << ";"
+							<< alpha * 180 / M_PI << ";" << betta * 180 / M_PI << ";"
+							<< delta_tang * 180 / M_PI << ";" << delta_risk * 180 / M_PI << ";" << delta_kren * 180 / M_PI << ";" << r << ";" << endl;
+				}
+				if (abs(yg) < 0.0001) break;	//Условие выхода
+				step++;
+				//Цикл расчета коэффициентов
+				for (int j = 1; j <= 4; j++) {
+					for (int i = 0; i <= 13; i++)  parbuf[i] = par[i] + K[i][j - 1] * a[j - 1]; // Считаем новые аргументы
+
+					// Нормировка параметров РГ
+					double norm_RG = pow(roRG_RK*roRG_RK + lamdaRG_RK*lamdaRG_RK + nuRG_RK*nuRG_RK + muRG_RK*muRG_RK, 0.5);
+					roRG_RK /= norm_RG;
+					lamdaRG_RK /= norm_RG;
+					nuRG_RK /= norm_RG;
+					muRG_RK /= norm_RG;
+					MATR(roRG_RK, lamdaRG_RK, muRG_RK, nuRG_RK, &A, &AT);
+
+					// Расчет промежуточных параметров на шаге
+					MATR(roRG_RK, lamdaRG_RK, muRG_RK, nuRG_RK, &A, &AT);
+					tang = asin(2 * (roRG_RK*nuRG_RK + lamdaRG_RK*muRG_RK));
+					risk = atan2(2 * (roRG_RK*muRG_RK - lamdaRG_RK*nuRG_RK), roRG_RK*roRG_RK + lamdaRG_RK*lamdaRG_RK - nuRG_RK*nuRG_RK - muRG_RK*muRG_RK);
+					kren = atan2(2 * (roRG_RK*lamdaRG_RK - muRG_RK*nuRG_RK), (roRG_RK*roRG_RK - lamdaRG_RK*lamdaRG_RK - nuRG_RK*nuRG_RK + muRG_RK*muRG_RK));
+					r = pow((xg_RK - x_t)*(xg_RK - x_t) + (yg_RK - y_t)*(yg_RK - y_t) + (zg_RK - z_t)*(zg_RK - z_t), 0.5),
+						V = pow(Vxg_RK*Vxg_RK + Vyg_RK*Vyg_RK + Vzg_RK*Vzg_RK, 0.5),
+						q = fro(yg_RK)*V*V*0.5,
+						vx = Vxg_RK*AT[0][0] + Vyg_RK*AT[0][1] + Vzg_RK*AT[0][2],
+						vy = Vxg_RK*AT[1][0] + Vyg_RK*AT[1][1] + Vzg_RK*AT[1][2],
+						vz = Vxg_RK*AT[2][0] + Vyg_RK*AT[2][1] + Vzg_RK*AT[2][2],
+						alpha = -atan2(vy, vx);
+					betta = asin(vz / V),
+						alpha_full = pow(alpha*alpha + betta*betta, 0.5),
+						fi = asin((y_t - yg_RK) / r),
+						hi = -atan2(z_t - zg_RK, x_t - xg_RK),
+						B_Matr(fi, hi, &B),
+						vr = B[0][0] * (Vx_t - Vxg_RK) + B[0][1] * (Vy_t - Vyg_RK) + B[0][2] * (Vz_t - Vzg_RK);
+					vfi = B[1][0] * (Vx_t - Vxg_RK) + B[1][1] * (Vy_t - Vyg_RK) + B[1][2] * (Vz_t - Vzg_RK);
+					vhi = B[2][0] * (Vx_t - Vxg_RK) + B[2][1] * (Vy_t - Vyg_RK) + B[2][2] * (Vz_t - Vzg_RK);
+					dfidt = vfi / r,
+						dhidt = vhi / (r*cos(fi)),
+						M = V / fa(yg_RK);
+						if (yg>500) Control_prog(tang, risk, kren, dfidt, dhidt, &delta_tang, &delta_risk, &delta_kren);
+					X = -Cx(M)*q*Sm,
+						Y = (Cy_alpha(M)*alpha + Cy_delta(M, alpha)*delta_tang)*q*Sm,
+						Z = (Cz_betta(M, betta)*betta + Cz_delta(M, betta)*delta_risk)*q*Sm,
+						Mstab = 0.5*dm * 1000 * delta_kren,
+						Mx = (mx_omegax()*omegax_RK*L / V + mx_delta(q*Sm*L)*delta_kren)*q*Sm*L + Mstab,
+						My = (my_omegay(M)*omegay_RK*L / V + my_betta(M)*betta + my_delta(M, betta)*delta_risk)*q*Sm*L,
+						Mz = (mz_omegaz(M)*omegaz_RK*L / V + mz_alpha(M)*alpha + mz_delta(M, alpha)*delta_tang)*q*Sm*L;
+
+					//Производные (коэффициенты K[i][j])
+					dtdt = 1 * dt,
+						dxgdt = Vxg_RK*dt,
+						dygdt = Vyg_RK*dt,
+						dzgdt = Vzg_RK*dt,
+						dVxgdt = 1 / m*(X*A[0][0] + Y*A[0][1] + Z*A[0][2])*dt,
+						dVygdt = 1 / m*(X*A[1][0] + Y*A[1][1] + Z*A[1][2] - m*g)*dt,
+						dVzgdt = 1 / m*(X*A[2][0] + Y*A[2][1] + Z*A[2][2])*dt,
+						domegaxdt = (Mx / Ix - omegay_RK*omegaz_RK*(Iz - Iy) / Ix)*dt,
+						domegaydt = (My / Iy - omegax_RK*omegaz_RK*(Ix - Iz) / Iy)*dt,
+						domegazdt = (Mz / Iz - omegay_RK*omegax_RK*(Iy - Ix) / Iz)*dt,
+						droRGdt = -(omegax_RK*lamdaRG_RK + omegay_RK*muRG_RK + omegaz_RK*nuRG_RK)*0.5*dt,
+						dlamdaRGdt = (omegax_RK*roRG_RK - omegay_RK*nuRG_RK + omegaz_RK*muRG_RK)*0.5*dt,
+						dmuRGdt = (omegax_RK*nuRG_RK + omegay_RK*roRG_RK + omegaz_RK*lamdaRG_RK)*0.5*dt,
+						dnuRGdt = (-omegax_RK*muRG_RK + omegay_RK*lamdaRG_RK + omegaz_RK*roRG_RK)*0.5*dt;
+
+				}
+
+				// Приращения
+				for (int i = 0; i <= 13; i++) {
+					double b[5] = { 0.0, 1.0 / 6.0, 2.0 / 6.0, 2.0 / 6.0, 1.0 / 6.0 };
+					for (int j = 1; j <= 4; j++) par[i] += K[i][j] * b[j];
+				}
+				// Нормировка параметров РГ
+				double norm_RG = pow(roRG*roRG + lamdaRG*lamdaRG + nuRG*nuRG + muRG*muRG, 0.5);
+				roRG /= norm_RG;
+				lamdaRG /= norm_RG;
+				nuRG /= norm_RG;
+				muRG /= norm_RG;
+			}  // Конец интегрирования траектории
+			// Вывод последнего шага
+			txtfile
+				<< t << ";" << xg << ";" << yg << ";" << zg << ";" << Vxg << ";" << Vyg << ";" << Vzg << ";" << V << ";"
+				<< tang * 180 / M_PI << ";" << risk * 180 / M_PI << ";" << kren * 180 / M_PI << ";"
+				<< omegax << ";" << omegay << ";" << omegaz << ";"
+				<< alpha * 180 / M_PI << ";" << betta * 180 / M_PI << ";"
+				<< delta_tang * 180 / M_PI << ";" << delta_risk * 180 / M_PI << ";" << delta_kren * 180 / M_PI << ";" << r << ";" << endl;
+
+			//if ((z_t == 0)&(r < 50)) flag1 = 1;  //вошли в начало зоны
+			//if ((z_t == 0)&(flag1 == 1)&(abs(r - 50) < 1E-3)) { flag2 = 1; flag1 = 0; } //вышли из зоны
+			//if ((flag1 == 0) | (dz_t < 1E-10)) break;
+			//Дробление шага
+			//if ((r > 50)&(flag1 == 1)) {
+				if (r > 50) {
+				z_t -= dz_t;
+				dz_t /= 10;
+			}
+			//Выход из цикла поиска зоны
+			//if ((abs(r - 50) < 1E-3)&(flag1 == 1)) {
+			if (abs(r - 50) < 0.1){
+				txtfile2 << x_t << ";" << z_t << ";" << r << endl;
+				break;
+			}
+			cout << "r = " << r << endl
+				<< "x_t = " << x_t << endl
+				<< "z_t = " << z_t << endl
+				<< "dz_t = " << dz_t << endl;
+			cout << endl;
+		}
+	}
+
+	cout << "END!" << endl;
+	txtfile2 << "r = ;" << r << endl
+		<< "x_t = ;" << x_t << endl
+		<< "z_t = ;" << z_t << endl;
+	system("pause");
+    return 0;
+}
+
+//Аэродинамика
+double Cx(double M) {
+	return pow(73.211 / exp(M) - 47.483 / M + 16.878, -1);
+}
+double Cy_alpha(double M) {
+	double A = 1.86*(11.554 / exp(M) - 2.5191E-3*M*M - 5.024 / M + 52.836E-3*M + 4.112);
+	if (A < 0) return 1.86*1.039;
+	else return pow(A, 0.5);
+}
+double Cy_delta(double M, double alpha) {
+	alpha = abs(alpha);
+	alpha *= 180 / M_PI;
+	double p1 = pow(243.84E-3 / exp(-alpha) + 74.309E-3, -1),
+		p2 = log10(1.9773*alpha*alpha - 25.587*alpha + 83.354),
+		p3 = 18.985*alpha*alpha - 375.76*alpha + 1471,
+		p4 = -51.164E-3*alpha*alpha + 805.52E-3*alpha + 1.8929;
+	return 2*(-p1*1E-6*M*M + p2*1E-2*exp(M) - p3*1E-6*M - p4*1E-3);
+}
+double Cz_betta(double M, double betta) {
+	return -Cy_alpha(M);
+}
+double Cz_delta(double M, double betta) {
+	return -Cy_delta(M, betta);
+}
+double mx_omegax() {
+	return -0.005*0.6786;
+}
+double mx_delta(double q) {
+	return -1000 / (q);
+}
+double mz_omegaz(double M) {
+	return 1.89*(146.79E-6*M*M - 158.98E-3 / M - 7.6396E-6*M - 68.195E-3);
+}
+double mz_alpha(double M) {
+	return -766.79E-3 / exp(M) + 438.74E-3 / M + 5.8822E-3*M - 158.34E-3	;
+}
+double mz_delta(double M, double alpha) {
+	alpha = abs(alpha);
+	alpha *= 180 / M_PI;
+	double k1 = exp(-19.488E-3*alpha*alpha - 378.62E-3*alpha + 6.7518),
+		k2 = exp(-21.234E-3*alpha*alpha - 635.84E-6*exp(alpha) - 98.296E-3*alpha + 2.5938);
+	return 1.89*pow(k1*1E-9*M*M + k2*1E-6, 0.5);
+}
+double my_omegay(double M) {
+	return mz_omegaz(M);
+}
+double my_betta(double M) {
+	return mz_alpha(M);
+}
+double my_delta(double M, double betta) {
+	return mz_delta(M, betta);
+}
+
+//Матрицы
+void B_Matr(double fi, double hi, double(*B)[3][3]) {
+	double b[3][3] = { 0 };
+	b[0][0] = cos(fi)*cos(hi);
+	b[0][1] = sin(fi);
+	b[0][2] = -cos(fi)*sin(hi);
+
+	b[1][0] = -sin(fi)*cos(hi);
+	b[1][1] = cos(fi);
+	b[1][2] = sin(fi)*sin(hi);
+
+	b[2][0] = sin(hi);
+	b[2][1] = 0;
+	b[2][2] = cos(hi);
+	for (int i = 0; i <= 2; i++) for (int j = 0; j <= 2; j++)
+		(*B)[i][j] = b[i][j];
+}
+void MATR(double ro, double lamda, double mu, double nu, double(*A)[3][3], double(*AT)[3][3]) {
+	double a[3][3] = { 0 };
+	// Матрица из нормальной земной в связную
+	a[0][0] = ro*ro + lamda*lamda - mu*mu - nu*nu;
+	a[0][1] = 2 * (-ro*nu + lamda*mu);
+	a[0][2] = 2 * (ro*mu + lamda*nu);
+
+	a[1][0] = 2 * (ro*nu + lamda*mu);
+	a[1][1] = ro*ro - lamda*lamda + mu*mu - nu*nu;
+	a[1][2] = 2 * (-ro*lamda + nu*mu);
+
+	a[2][0] = 2 * (-ro*mu + lamda*nu);
+	a[2][1] = 2 * (ro*lamda + nu*mu);
+	a[2][2] = ro*ro - lamda*lamda - mu*mu + nu*nu;
+
+	for (int i = 0; i <= 2; i++) for (int j = 0; j <= 2; j++)
+		(*A)[i][j] = a[i][j];
+	//Из связной в нормальную
+	for (int i = 0; i <= 2; i++) for (int j = 0; j <= 2; j++)
+		(*AT)[i][j] = a[j][i];
+}
+
+//Стабилизация и наведение
+void Control_prog(double tang, double risk, double kren, double dfidt, double dhidt, double *delta_tang, double *delta_risk, double *delta_kren) {
+
+	//Для наведения
+	const double KSI_SST = 0.35;
+	const double KSI_SSN = 0.35;
+	const double KSI_SSE = 0.35;
+	const double K_SST = 0.95;
+	const double K_SSN = 0.95;
+	const double T_SSE = 0.01;
+
+	double a11 = -mz_omegaz(M) * q * Sm * L * L / (Iz * V);
+	double a12 = -mz_alpha(M) * q * Sm * L / Iz;
+	double a13 = -mz_delta(M, alpha) * q * Sm * L / Iz;
+	double a42 = Cy_alpha(M) * q * Sm / (m * V);
+	double a43 = Cy_delta(M, alpha) * q * Sm / (m * V);
+	double vke = Cy_delta(M,alpha);
+
+	double b11 = -my_omegay(M) * q * Sm * L * L / (Iy * V);
+	double b12 = -my_betta(M) * q * Sm * L / Iy;
+	double b13 = -my_delta(M, betta) * q * Sm * L / Iy;
+	double b42 = 0;
+	double b43 = -Cy_delta(M, betta) * q * Sm / (m * V);
+
+	double c11 = mx_omegax() * q * Sm * L * L / (Ix * V);
+	double c13 = mx_delta(q*Sm*L) * q*Sm*L / Ix;
+
+	double K_T = (a12 * a43 - a13 * a42) / (a12 + a11 * a42);
+	double T_1T = -(a13) / (a13 * a42 - a12 * a43);
+	double T_T = 1 / sqrt(a12 + a11 * a42);
+	double KSI_T = (a11 + a42) / (2 * sqrt(a12 + a11 * a42));
+
+	double K_N = (b12 * b43 - b13 * b42) / (b12 + b11 * b42);
+	double T_1N = -(b13) / (b13 * b42 - b12 * b43);
+	double T_N = 1 / sqrt(b12 + b11 * b42);
+	double KSI_N = (b11 + b42) / (2 * sqrt(b12 + b11 * b42));
+
+	double K_E = c13 / c11;
+	double T_E = 1 / c11;
+
+	double K_fi = 9, K_hi = 10;
+	double Kk_t = 6.0, Kk_n = 10;
+
+	double sf = KSI_SST * KSI_SST*KSI_SST*KSI_SST*T_T*T_T;
+	double gf = 2 * KSI_T*KSI_SST*KSI_SST*T_T*T_1T;
+	double hf = T_1T * T_1T*KSI_SST*KSI_SST;
+	double df = sqrt(sf - gf + hf);
+	double K_T2 = -2 * T_T*(KSI_T*T_1T - KSI_SST * KSI_SST*T_T - df) / (K_T*T_1T*T_1T);
+	double K_T1 = K_SST * (1 + K_T2 * K_T) / (K_T*T_1T*T_1T);
+	double K_N2 = -2 * T_N * (KSI_N * T_1N - KSI_SSN * KSI_SSN*T_N - sqrt(KSI_SSN * KSI_SSN * KSI_SSN * KSI_SSN * T_N * T_N - 2 * KSI_N*KSI_SSN*KSI_SSN*T_N*T_1N + T_1N * T_1N*KSI_SSN*KSI_SSN)) / (K_N*T_1N*T_1N);
+	double K_N1 = K_SSN * (1 + K_N2 * K_N) / (K_N*T_1N*T_1N);
+
+	double K_E1 = (2 * KSI_SSE*T_E - T_SSE) / (K_E*T_SSE);
+	double K_E2 = T_E / (K_E*T_SSE*T_SSE);
+
+	double K_T22 = K_T1 * K_fi * Kk_t;
+	double K_N22 = K_N1 * K_hi * Kk_n;
+
+	double deltaT = -K_T2 * (omegaz * cos(kren) + omegay * sin(kren)) + K_T22 * dfidt;
+	double deltaN = -K_N2 * (omegay * cos(kren) - omegaz * sin(kren)) / cos(tang) + K_N22 * dhidt;
+	double deltaE = -K_E2 * kren - K_E1 * (omegax - tan(tang)*(omegay * cos(kren) - omegaz * sin(kren)));
+
+	const double angleDelta = 15*M_PI/180;
+	*delta_tang = (abs(deltaT) > angleDelta) ? angleDelta *(deltaT / abs(deltaT)) : deltaT;
+	*delta_risk = (abs(deltaN) > angleDelta) ? angleDelta *(deltaN / abs(deltaN)) : deltaN;
+	*delta_kren = (abs(deltaE) > angleDelta) ? angleDelta *(deltaE / abs(deltaE)) : deltaE;
+}
+
+
